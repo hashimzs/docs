@@ -327,7 +327,7 @@ export default defineNuxtConfig({
 
     multiCache: {
         data: {
-            enabled: true,
+            enabled: process.env.CACHE_ENABLED !== 'false',
         },
     },
 

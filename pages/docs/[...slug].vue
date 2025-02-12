@@ -1,10 +1,11 @@
 <template>
     <div class="container-fluid bd-gutter bd-layout type-docs">
         <NavSideBar type="docs" :navigation="navigation"/>
-        <article v-if="page" class="bd-main order-1 docs" :class="{'full': page?.rightBar === false , 'homepage': page?.meta?.isHomepage}">
+        <article v-if="page" class="bd-main order-1 docs"
+                 :class="{'full': page?.rightBar === false , 'homepage': page?.meta?.isHomepage}">
             <div class="bd-title">
                 <Breadcrumb :slug="slug" :pageList="pageList" :pageNames="pageNames" :pageTitle="page.title"/>
-                <h1 v-if="page.title" class="py-0 title">
+                <h1 v-if="page?.title" class="py-0 title">
                     <NuxtImg
                         v-if="page.icon"
                         :src="page.icon"
@@ -12,22 +13,26 @@
                         width="40"
                         height="40"
                         loading="lazy"
+                        format="webp"
+                        quality="80"
+                        densities="x1 x2"
                         class="me-3 page-icon"
                     />
                     <span v-html="transformTitle(page.title)"></span>
                 </h1>
             </div>
 
-            <NavToc :page="page" class="my-md-0 my-4 right-menu" />
+            <NavToc :page="page" class="my-md-0 my-4 right-menu"/>
 
             <div class="bd-content">
-                <DocsFeatureScopeMarker v-if="page.editions || page.version || page.deprecated || page.release" :page="page"/>
+                <DocsFeatureScopeMarker v-if="page.editions || page.version || page.deprecated || page.release"
+                                        :page="page"/>
 
                 <ContentRenderer class="bd-markdown" v-if="page" :value="page"/>
 
                 <template v-if="!page?.meta?.isHomepage">
-                    <HelpfulVote />
-                    <PrevNext :navigation="navigation" />
+                    <HelpfulVote/>
+                    <PrevNext :navigation="navigation"/>
                 </template>
             </div>
         </article>
@@ -36,116 +41,116 @@
 </template>
 
 <script setup>
-  import PrevNext from "~/components/layout/PrevNext.vue";
-  import NavSideBar from "~/components/docs/NavSideBar.vue";
-  import Breadcrumb from "~/components/layout/Breadcrumb.vue";
-  import NavToc from "~/components/docs/NavToc.vue";
-  import HelpfulVote from "~/components/docs/HelpfulVote.vue";
-  import {hash} from "ohash";
-  import {recursivePages, generatePageNames} from "~/utils/navigation.js";
+    import PrevNext from "~/components/layout/PrevNext.vue";
+    import NavSideBar from "~/components/docs/NavSideBar.vue";
+    import Breadcrumb from "~/components/layout/Breadcrumb.vue";
+    import NavToc from "~/components/docs/NavToc.vue";
+    import HelpfulVote from "~/components/docs/HelpfulVote.vue";
+    import {hash} from "ohash";
+    import {generatePageNames, recursivePages} from "~/utils/navigation.js";
 
-  const config = useRuntimeConfig();
+    const config = useRuntimeConfig();
 
-  const route = useRoute()
-  const slug = computed(() => `/docs/${route.params.slug instanceof Array ? route.params.slug.join('/') : route.params.slug}`);
-  let page;
+    const route = useRoute()
+    const slug = computed(() => `/docs/${route.params.slug instanceof Array ? route.params.slug.join('/') : route.params.slug}`);
+    let page;
 
-  const fetchNavigation = async () => {
-    let pageList = null;
-    let pageNames = null;
+    const fetchNavigation = async () => {
+        let pageList;
+        let pageNames;
 
-      const {data, error} = await useAsyncData(
-        `NavSideBar-docs`,
-        () => queryCollectionNavigation('docs', ['hideSubMenus'])
-      );
+        const {data, error} = await useAsyncData(
+            `NavSideBar-docs`,
+            () => queryCollectionNavigation('docs', ['hideSubMenus'])
+        );
 
-      if(error && error.value) {
-        throw error.value;
-      }
+        if(error && error.value) {
+            throw error.value;
+        }
 
-      if (data && data.value && !data.value[0].children.find((item) => (item?.title === "Videos Tutorials"))) {
-        data.value[0].children.splice(data.value[0].children.length - 3, 0 , {
-          title: "Videos Tutorials",
-          path: "/tutorial-videos",
+        if (data && data.value && !data.value[0].children.find((item) => (item?.title === "Videos Tutorials"))) {
+            data.value[0].children.splice(data.value[0].children.length - 3, 0 , {
+                title: "Videos Tutorials",
+                path: "/tutorial-videos",
+            });
+        }
+        pageList = recursivePages(data.value[0]);
+        pageNames = generatePageNames(data.value[0]);
+
+        const sections = config.public.docs.sections;
+
+        const newData = [];
+
+        Object.entries(sections).forEach(([sectionName, titles]) => {
+            // Add the section object
+            newData.push({ title: sectionName, isSection: true, path: "/" });
+
+            // Add the matching items from the data array
+            titles.forEach(title => {
+                const matchedItem = data.value[0].children.find(item => item?.title === title);
+                if (matchedItem) {
+                    newData.push(matchedItem);
+                }
+            });
         });
-      }
-      pageList = recursivePages(data.value[0]);
-      pageNames = generatePageNames(data.value[0]);
 
-      const sections = config.public.docs.sections;
-
-      const newData = [];
-
-      Object.entries(sections).forEach(([sectionName, titles]) => {
-        // Add the section object
-        newData.push({ title: sectionName, isSection: true, path: "/" });
-
-        // Add the matching items from the data array
-        titles.forEach(title => {
-          const matchedItem = data.value[0].children.find(item => item?.title === title);
-          if (matchedItem) {
-            newData.push(matchedItem);
-          }
-        });
-      });
-
-      data.value[0].children = newData;
+        data.value[0].children = newData;
 
 
-    const navigation = data;
+        const navigation = data;
 
-    return {navigation, pageList, pageNames};
-  }
+        return {navigation, pageList, pageNames};
+    }
 
-  const transformTitle = (text) => {
-    return text
-      .replace(/([A-Z])/g, '&#x200B;$1')
-      .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '');
-  }
+    const transformTitle = (text) => {
+        return text
+            .replace(/([A-Z])/g, '&#x200B;$1')
+            .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '');
+    }
 
-  if (slug.value.endsWith(".md")) {
-    await navigateTo(slug.value.substring(0, slug.value.length - 3));
-  }
+    if (slug.value.endsWith(".md")) {
+        await navigateTo(slug.value.substring(0, slug.value.length - 3));
+    }
 
-  const {origin} = useRequestURL()
+    const {origin} = useRequestURL()
 
-  let ogImage = `${origin}/landing/home/header-bg.png`;
+    let ogImage = `${origin}/landing/home/header-bg.png`;
 
 
     const {data, error} = await useAsyncData(`Container-${hash(slug.value)}`, () => {
-      try {
-        return queryCollection('docs').path(slug.value.replace(/\/$/, '')).first();
-      } catch (error) {
-        throw createError({statusCode: 404, message: error.toString(), data: error, fatal: true})
-      }
+        try {
+            return queryCollection('docs').path(slug.value.replace(/\/$/, '')).first();
+        } catch (error) {
+            throw createError({statusCode: 404, message: error.toString(), data: error, fatal: true})
+        }
     });
     page = data.value;
     if (error && error.value) {
-      throw error.value;
+        throw error.value;
     }
     const iconPath = page?.icon?.split('/');
     const pageName = iconPath && iconPath[iconPath?.length - 1]?.split('.')[0];
     ogImage = `${origin}/meta/docs/${pageName || 'default'}.svg?title=${page?.title || ''}`
 
 
-  const {navigation, pageList, pageNames} = await fetchNavigation();
+    const {navigation, pageList, pageNames} = await fetchNavigation();
 
-  const {description, title} = page ?? {};
+    const {description, title} = page ?? {};
     useHead({
-      meta: [
-        {property: 'og:title', content: title},
-        {property: 'og:description', content: description},
-        {property: 'og:image', content: ogImage},
-        {property: 'og:image:type', content: "image/svg+xml"},
-        {property: 'og:image:alt', content: title},
-        {property: 'og:url', content: `${origin}${route.path}`},
-        {name: 'twitter:card', content: 'summary_large_image'},
-        {name: 'twitter:site', content: '@kestra_io'},
-        {name: 'twitter:title', content: title},
-        {name: 'twitter:description', content: description},
-        {name: 'twitter:image', content: ogImage},
-        {name: 'twitter:image:alt', content: title}
-      ]
+        meta: [
+            {property: 'og:title', content: title},
+            {property: 'og:description', content: description},
+            {property: 'og:image', content: ogImage},
+            {property: 'og:image:type', content: "image/svg+xml"},
+            {property: 'og:image:alt', content: title},
+            {property: 'og:url', content: `${origin}${route.path}`},
+            {name: 'twitter:card', content: 'summary_large_image'},
+            {name: 'twitter:site', content: '@kestra_io'},
+            {name: 'twitter:title', content: title},
+            {name: 'twitter:description', content: description},
+            {name: 'twitter:image', content: ogImage},
+            {name: 'twitter:image:alt', content: title}
+        ]
     })
 </script>
 
@@ -158,6 +163,7 @@
 
         .bd-title {
             margin-top: 4rem;
+
             h1 {
                 max-width: 45.8rem;
                 @media only screen and (min-width: 1920px) {
@@ -165,12 +171,14 @@
                 }
             }
         }
+
         .bd-main {
             gap: 2rem 2rem;
             @include media-breakpoint-down(sm) {
                 gap: 2rem 7rem;
             }
         }
+
         .bd-content {
             margin: 0 auto 2em auto;
             max-width: 45.8rem;
@@ -179,6 +187,7 @@
             }
 
         }
+
         .title {
             font-size: $h2-font-size;
             font-weight: 400;

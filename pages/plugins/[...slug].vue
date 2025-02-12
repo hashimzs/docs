@@ -4,25 +4,29 @@
         <article class="bd-main order-1" :class="{'full': page?.rightBar === false }">
             <div class="bd-title">
                 <Breadcrumb :slug="slug" :pageList="pageList" :pageNames="pageNames"/>
-                <h1 v-if="page && getPageTitle()" class="py-0 title">
+                <h1 v-if="page && pageName" class="py-0 title">
                     <NuxtImg
                         v-if="pageIcon"
                         :src="pageIcon"
-                        :alt="getPageTitle()"
+                        :alt="pageName"
                         width="40"
                         height="40"
                         loading="lazy"
+                        format="webp"
+                        quality="80"
+                        densities="x1 x2"
                         class="me-3 page-icon"
                     />
-                    <span v-html="transformTitle(getPageTitle())"></span>
+                    <span v-html="transformTitle(pageName)"></span>
                 </h1>
             </div>
             <NavToc :rate-helpful="true" :page="page" class="my-md-0 my-4 right-menu"/>
 
-            <div class="bd-content">
+            <div class="bd-content" v-if="page">
                 <DocsFeatureScopeMarker v-if="page.editions || page.version || page.deprecated || page.release" :page="page" />
-                <Suspense v-if="page.pluginType === 'definitions'">
-                    <SchemaToHtml class="plugin-schema" :schema="page.body.jsonSchema" :plugin-type="getPageName()" :props-initially-expanded="true">
+                <Suspense v-if="page.pageType === 'definitions'">
+                    <SchemaToHtml class="plugin-schema" :schema="page.body.jsonSchema" :plugin-type="pluginType"
+                                  :props-initially-expanded="true">
                         <template #markdown="{ content }">
                             <MDC :value="content">
                                 <template #default="{data, body}">
@@ -35,29 +39,36 @@
                         </template>
                     </SchemaToHtml>
                 </Suspense>
-                <ContentRenderer
-                    class="bd-markdown"
-                    :value="page"
-                    data-bs-spy="scroll"
-                    data-bs-target="#nav-toc"
-                    v-else
-                />
+                <PluginIndex class="plugin-index"
+                             :icons="icons"
+                             :plugins="page.body.plugins"
+                             :plugin-name="pluginName"
+                             :sub-group="subGroup" v-else>
+                    <template v-slot:markdown="{ content }">
+                        <MDC :value="content"/>
+                    </template>
+                </PluginIndex>
             </div>
         </article>
     </div>
 </template>
 
-<script setup>
-    import {hash} from "ohash";
+<script setup lang="ts">
     import {SchemaToHtml} from '@kestra-io/ui-libs'
     import NavSideBar from "~/components/docs/NavSideBar.vue";
     import Breadcrumb from "~/components/layout/Breadcrumb.vue";
     import NavToc from "~/components/docs/NavToc.vue";
-    import {recursivePages, generatePageNames} from "~/utils/navigation.js";
+    import {generatePageNames, recursivePages} from "~/utils/navigation.js";
+    import PluginIndex from "~/components/plugins/PluginIndex.vue";
+    import type {Plugin} from "~/utils/plugins.js";
+    import {isEntryAPluginElementPredicate, subGroupName} from "~/utils/plugins.js";
+    import {slugify} from "~/utils/url.js";
 
     const route = useRoute()
-    const slug = computed(() => `/plugins/${route.params.slug instanceof Array ? route.params.slug.join('/') : route.params.slug}`);
-    let page;
+    const routeSlug = route.params.slug instanceof Array ? route.params.slug.join('/') : route.params.slug;
+    const slug = computed(() => `/plugins/${routeSlug}`);
+    const splitRouteSlug = routeSlug.split("/");
+    const pluginName = computed(() => splitRouteSlug?.[0]);
 
     // make MDCRenderer use the prose components of this content
     const proseComponentsImports = import.meta.glob("~/components/content/Prose*.vue", {eager: true})
@@ -71,7 +82,6 @@
         }
     }
 
-
     const fetchNavigation = async () => {
         const navigationFetch = await useFetch(`/api/plugins?type=navigation`);
         const navigation = navigationFetch.data.value;
@@ -82,60 +92,126 @@
         return {navigation, pageList, pageNames};
     }
 
+    function pluginToc(subGroupsWrappers: Plugin[]) {
+        return subGroupsWrappers.filter(subGroupWrapper => subGroupWrapper.subGroup !== undefined)
+            .map(subGroupWrapper => {
+                let subGroup = subGroupName(subGroupWrapper);
+                return ({
+                    id: `group-${slugify(subGroup)}`,
+                    depth: 2,
+                    text: subGroup
+                });
+            });
+    }
+
+    function pluginSubGroupToc(subGroupWrapper: Plugin) {
+        return Object.entries(subGroupWrapper).filter(([key, value]) => isEntryAPluginElementPredicate(key, value))
+            .map(([key, value]) => {
+                return {
+                    id: `section-${slugify(key)}`,
+                    depth: 2,
+                    text: key.capitalize(),
+                    children: value.map((element) => ({
+                        id: slugify(element),
+                        depth: 3,
+                        text: element.substring(element.lastIndexOf('.') + 1)
+                    }))
+                };
+            });
+    }
+
     const transformTitle = (text) => {
         return text
             .replace(/([A-Z])/g, '&#x200B;$1')
             .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '');
     }
 
-    const parts = slug.value.split('/');
-    let pageUrl;
-    if (parts?.length > 3) {
-        pageUrl = `/api/plugins?page=${parts[parts?.length - 1].replace(/.md$/, "")}&type=definitions`
-    } else {
-        pageUrl = `/api/plugins?page=${parts[2]}&type=plugin`
-    }
-
-    const {data: pluginInformation} = await useAsyncData(`Container-${hash(pageUrl)}`, () => {
-        return $fetch(pageUrl)
+    const pluginType = computed(() => splitRouteSlug[splitRouteSlug.length - 1].includes(".") ? splitRouteSlug[splitRouteSlug?.length - 1].replace(/.md$/, "") : undefined);
+    const subGroup = computed(() => {
+        const maybeSubGroup = splitRouteSlug?.[1];
+        return maybeSubGroup?.includes(".") ? undefined : maybeSubGroup;
     });
 
-    if (pluginInformation?.value?.error) {
-        throw createError({statusCode: 404, message: pluginInformation?.value?.message, fatal: true})
+    const pageUrl = computed(() => pluginType.value === undefined ? `/api/plugins?page=${splitRouteSlug[0]}&type=plugin` : `/api/plugins?page=${pluginType.value}&type=definitions`);
+    const dataKey = computed(() => pluginType.value === undefined ? splitRouteSlug[0] : pluginType.value);
+
+    const {data: page} = await useAsyncData(`Container-${dataKey.value}`, () => {
+        return $fetch(pageUrl.value)
+    });
+
+    if (page?.value?.error) {
+        throw createError({statusCode: 404, message: page?.value?.message, fatal: true})
     }
-    page = pluginInformation?.value;
+
+    if (page.value.body.toc === undefined) {
+        let links;
+        if (subGroup.value !== undefined) {
+            links = pluginSubGroupToc(page.value.body.plugins.find(p => slugify(subGroupName(p)) === subGroup.value));
+        } else if (page?.value.body.plugins.length === 1) {
+            links = pluginSubGroupToc(page.value.body.plugins[0]);
+        } else {
+            links = pluginToc(page.value.body.plugins)
+        }
+        page.value.body.toc = {
+            links
+        }
+    }
+
+    page.value.title = page.value.title ??
+        page.value.body.plugins.find(p => p.subGroup === undefined).title.capitalize().concat(
+            subGroup.value === undefined ? "" : ` - ${subGroupName({title: subGroup.value})}`
+        );
+
+    const subGroupWrapper = computed(() => subGroup.value === undefined ? undefined : page.value.body.plugins.find(p => slugify(subGroupName(p)) === subGroup.value));
 
     const {navigation, pageList, pageNames} = await fetchNavigation();
 
-    const getPageType = () => {
-        const paths = route.path.split('/');
-        return paths[paths?.length - 1];
-    }
+    const pageName = computed(() => pageNames[route.path]);
 
-    const getPageName = () => {
-        const pageType = getPageType().split('.');
-        pageType[pageType?.length - 1] = pageNames[getPageType()];
-        return pageType.join('.');
-    }
+    let {data: icons} = await useAsyncData(`PluginSubgroupsIcon-${pluginName.value}`, () => {
+        try {
+            return $fetch(`/api/plugins?page=${pluginName.value}&type=subGroupsIcons`);
+        } catch (error) {
+            throw createError({statusCode: 404, message: error.toString(), data: error, fatal: true})
+        }
+    });
 
-    let pageIcon = page.icon;
-    if (page.pluginType === 'definitions') {
-        const iconB64 = await $fetch(`/api/plugins?page=${getPageName()}&type=icon`);
-        pageIcon = `data:image/svg+xml;base64,${iconB64}`;
-    } else {
-        const iconB64 = pageIcon.substring(26)
-        const coloredIcon = atob(iconB64).replace(/currentColor/g, '#CAC5DA');
-        pageIcon = `data:image/svg+xml;base64,${btoa(coloredIcon)}`;
-    }
+    const {data: elementsIcons} = await useAsyncData(`PluginElementsIcon-${pluginName.value}`, () => {
+        try {
+            return $fetch(`/api/plugins?page=${pluginName.value}&type=elementsIcons`);
+        } catch (error) {
+            throw createError({statusCode: 404, message: error.toString(), data: error, fatal: true})
+        }
+    });
+    icons = ref({
+        ...icons.value,
+        ...elementsIcons.value
+    });
 
-    const getPageTitle = () => {
-        return pageNames[getPageType()];
-    }
+    const pageIcon = computed(() => {
+        let icon;
+        if (page.value.pageType === "definitions") {
+            icon = icons.value[pluginType.value];
+            if (icon === undefined) {
+                icon = Object.entries(icons.value).filter(([key]) => pluginType.value.includes(key))
+                    .sort(([key1], [key2]) => key2.length - key1.length)?.[0]?.[1];
+            }
+        } else if (subGroup.value === undefined) {
+            icon = icons.value[page.value.body.group];
+        } else {
+            icon = icons.value[subGroupWrapper.value.subGroup]
+        }
 
-    const {description, title} = page;
+        return `data:image/svg+xml;base64,${icon}`;
+    });
+
+    const {description, title} = page.value;
     const {origin} = useRequestURL();
     useHead({
+        title,
         meta: [
+            {name: 'title', content: title},
+            {name: 'description', content: description},
             {name: 'twitter:card', content: 'summary_large_image'},
             {name: 'twitter:site', content: '@kestra_io'},
             {name: 'twitter:title', content: title},
@@ -179,7 +255,7 @@
         .bd-content {
             margin: 0 auto 2em auto;
             @media only screen and (min-width: 1920px) {
-                max-width:71.25rem
+                max-width: 71.25rem
             }
         }
 
@@ -330,7 +406,7 @@
         }
 
         :deep(.plugin-section) {
-            & .material-design-icon {
+            .material-design-icon {
                 &, & * {
                     bottom: 0;
                 }
@@ -409,7 +485,7 @@
                 }
             }
 
-            .type-box{
+            .type-box {
                 color: var(--kestra-io-token-color-white);
 
                 .ref-type {
@@ -429,5 +505,47 @@
 
     :deep(.bd-markdown > h2 > a > span ) {
         display: inline !important;
+    }
+
+    .plugin-index {
+        :deep(div):has(> .row-link) {
+            gap: var(--spacer);
+        }
+
+        :deep(.elements-section) {
+            gap: calc(2 * var(--spacer));
+        }
+
+        :deep(.row-link) {
+            padding: calc(.5 * var(--spacer)) calc(2 * var(--spacer));
+            background: var(--kestra-io-token-color-background-secondary);
+            color: var(--kestra-io-token-color-white);
+            border: 1px solid var(--kestra-io-token-color-border-secondary);
+
+            &:hover, &:focus {
+                outline: none;
+                background: var(--kestra-io-neutral-gray300);
+                border: 1px solid var(--tokens-border-border-active);
+
+                .material-design-icon {
+                    color: var(--kestra-io-neutral-white);
+                }
+            }
+
+            img {
+                width: 3.375rem;
+                height: 3.375rem;
+            }
+
+            .material-design-icon {
+                color: var(--kestra-io-neutral-gray700);
+
+                &, & * {
+                    width: 1.5rem;
+                    height: 1.5rem;
+                    bottom: 0;
+                }
+            }
+        }
     }
 </style>
